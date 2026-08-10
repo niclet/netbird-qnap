@@ -7,32 +7,53 @@ QPKG_NAME="netbird"
 QPKG_ROOT=$(/sbin/getcfg $QPKG_NAME Install_Path -f ${CONF})
 NETBIRD_BIN="${QPKG_ROOT}/netbird"
 NETBIRD_CONF="${QPKG_ROOT}/netbird.conf"
+NETBIRD_COMMON="${QPKG_ROOT}/netbird-common.sh"
+LAST_ERROR="${QPKG_ROOT}/last-error"
 PIDF="/var/run/netbird.pid"
 SVCLOG="/var/log/netbird-service.log"
 APACHE_CONF="/etc/default_config/apache-netbird.conf"
 
+# 'netbird up' normally finishes in seconds. It can block indefinitely if the
+# peer is unregistered and falls through to an interactive SSO flow, which
+# would hang the whole QPKG start, so it runs under a timeout.
+NB_UP_TIMEOUT=90
+
 export QNAP_QPKG=$QPKG_NAME
+
+if [ -z "$QPKG_ROOT" ] || [ ! -f "$NETBIRD_COMMON" ]; then
+    echo "netbird: cannot locate the install path (QPKG_ROOT='$QPKG_ROOT')." >&2
+    echo "netbird: expected shared helpers at '$NETBIRD_COMMON'." >&2
+    echo "$(date '+%Y-%m-%d %H:%M:%S') ABORT: QPKG_ROOT='$QPKG_ROOT', missing $NETBIRD_COMMON" >> "$SVCLOG"
+    exit 1
+fi
+
+# shellcheck source=netbird-common.sh
+. "$NETBIRD_COMMON"
 
 log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >> "$SVCLOG"
     echo "$1"
 }
 
-load_config() {
-    if [ -f "$NETBIRD_CONF" ]; then
-        # shellcheck source=/dev/null
-        . "$NETBIRD_CONF"
-    fi
+record_error() {
+    printf '%s\n' "$1" > "$LAST_ERROR" 2>/dev/null
+    chmod 644 "$LAST_ERROR" 2>/dev/null
 }
 
-export_nb_env() {
-    load_config
-    [ -n "$SETUP_KEY" ]      && export NB_SETUP_KEY="$SETUP_KEY"
-    [ -n "$MANAGEMENT_URL" ] && export NB_MANAGEMENT_URL="$MANAGEMENT_URL"
-    [ -n "$ADMIN_URL" ]      && export NB_ADMIN_URL="$ADMIN_URL"
-    [ -n "$HOSTNAME" ]       && export NB_HOSTNAME="$HOSTNAME"
-    [ -n "$LOG_LEVEL" ]      && export NB_LOG_LEVEL="$LOG_LEVEL"
-    [ -n "$LOG_FILE" ]       && export NB_LOG_FILE="$LOG_FILE"
+clear_error() {
+    rm -f "$LAST_ERROR" 2>/dev/null
+}
+
+# nb_timeout_prefix echoes a working timeout invocation, or nothing when the
+# NAS has no usable timeout. BusyBox changed the syntax from "timeout -t SEC"
+# to "timeout SEC" partway through its history and QTS versions differ, so it
+# is probed rather than assumed.
+nb_timeout_prefix() {
+    if timeout 1 true >/dev/null 2>&1; then
+        printf 'timeout %s' "$NB_UP_TIMEOUT"
+    elif timeout -t 1 true >/dev/null 2>&1; then
+        printf 'timeout -t %s' "$NB_UP_TIMEOUT"
+    fi
 }
 
 setup_webui() {
@@ -111,6 +132,54 @@ teardown_webui() {
     rm -f /home/Qhttpd/Web/netbird 2>/dev/null
 }
 
+# run_netbird_up builds the argv from netbird.conf and runs 'netbird up'.
+#
+# Every setting is passed explicitly rather than through NB_* environment
+# variables so that the config file, not the daemon's stored profile, decides
+# what this peer connects to. Output goes to $1; the exit status is returned.
+run_netbird_up() {
+    _out="$1"
+    _argv_log=""
+
+    set --
+    for _row in $NB_OPTION_TABLE; do
+        _key=${_row%%|*}
+        _flag=$(nb_row_flag "$_row")
+        _type=$(nb_row_type "$_row")
+        [ "$_type" = "local" ] && continue
+
+        eval "_val=\${NBQ_$_key-}"
+        [ -n "$_val" ] || continue
+
+        case "$_type" in
+            bool)
+                _norm=$(nb_bool "$_val") || continue
+                set -- "$@" "--${_flag}=${_norm}"
+                _argv_log="${_argv_log} --${_flag}=${_norm}"
+                ;;
+            secret)
+                set -- "$@" "--${_flag}" "$_val"
+                _argv_log="${_argv_log} --${_flag} ***"
+                ;;
+            *)
+                set -- "$@" "--${_flag}" "$_val"
+                _argv_log="${_argv_log} --${_flag} ${_val}"
+                ;;
+        esac
+    done
+
+    # EXTRA_ARGS is a free-text escape hatch and is deliberately word-split.
+    # shellcheck disable=SC2086
+    set -- "$@" $NBQ_EXTRA_ARGS
+    [ -n "$NBQ_EXTRA_ARGS" ] && _argv_log="${_argv_log} ${NBQ_EXTRA_ARGS}"
+
+    log "Running: netbird up${_argv_log}"
+
+    _to=$(nb_timeout_prefix)
+    # shellcheck disable=SC2086
+    $_to "$NETBIRD_BIN" up "$@" >> "$_out" 2>&1
+}
+
 start_service() {
     log "=== START ==="
     log "QPKG_ROOT=$QPKG_ROOT"
@@ -128,14 +197,15 @@ start_service() {
 
     if [ ! -x "$NETBIRD_BIN" ]; then
         log "ABORT: netbird binary not found at $NETBIRD_BIN"
+        record_error "netbird binary not found at $NETBIRD_BIN"
         exit 1
     fi
 
-    export_nb_env
+    nb_load_config "$NETBIRD_CONF"
     export HOME="${QPKG_ROOT}"
 
-    _log_file="${NB_LOG_FILE:-/var/log/netbird.log}"
-    _log_level="${NB_LOG_LEVEL:-info}"
+    _log_file="${NBQ_LOG_FILE:-/var/log/netbird.log}"
+    _log_level="${NBQ_LOG_LEVEL:-info}"
 
     mkdir -p /etc/netbird 2>/dev/null
     ln -sf "$NETBIRD_BIN" /usr/local/bin/netbird 2>/dev/null
@@ -173,19 +243,52 @@ start_service() {
 
     if [ ! -S /var/run/netbird.sock ]; then
         log "WARNING: daemon socket not ready after 15 seconds (check $_log_file)"
+        record_error "Daemon socket /var/run/netbird.sock was not ready after 15 seconds. Check $_log_file."
         return 1
     fi
     log "Daemon socket ready"
 
-    # Bring tunnel up only if setup key is configured
-    if [ -n "$NB_SETUP_KEY" ]; then
-        log "Setup key found, running 'netbird up'"
-        # shellcheck disable=SC2086
-        "$NETBIRD_BIN" up $EXTRA_ARGS >> "$SVCLOG" 2>&1
-    else
-        log "No SETUP_KEY configured. Daemon running but tunnel not activated."
-        log "Configure via web UI at /netbird/ or edit $NETBIRD_CONF"
+    # Decide whether 'netbird up' can run unattended. With a setup key it can
+    # always register. Without one it can only reconnect an already-registered
+    # peer -- an unregistered peer would fall through to interactive SSO.
+    _status_json=$("$NETBIRD_BIN" status --json 2>/dev/null)
+    _daemon_status=$(nb_json_str "$_status_json" daemonStatus)
+    log "Daemon status before apply: ${_daemon_status:-unknown}"
+
+    if [ -z "$NBQ_SETUP_KEY" ] && { [ -z "$_daemon_status" ] || [ "$_daemon_status" = "NeedsLogin" ]; }; then
+        log "No SETUP_KEY configured and this peer is not registered."
+        log "Daemon is running but the tunnel is not activated."
+        log "Configure via the web UI at /netbird/ or edit $NETBIRD_CONF"
+        record_error "No setup key configured. Enter one on the settings page and press Save & Restart."
+        log "=== START COMPLETE (tunnel not activated) ==="
+        return 0
     fi
+
+    # 'netbird up' returns early with "Already connected" -- before it sends
+    # SetConfig -- whenever the daemon reports StatusConnected, and the daemon
+    # auto-connects from its stored profile as soon as it starts. Without this
+    # 'down' every setting below is silently discarded and 'up' still exits 0,
+    # which is how a stale management URL survives every restart.
+    log "Bringing tunnel down before applying settings"
+    "$NETBIRD_BIN" down >> "$SVCLOG" 2>&1
+
+    _up_out="/tmp/netbird-up.$$"
+    : > "$_up_out"
+    run_netbird_up "$_up_out"
+    _rc=$?
+    cat "$_up_out" >> "$SVCLOG" 2>/dev/null
+
+    if [ $_rc -ne 0 ]; then
+        log "ERROR: 'netbird up' failed (rc=$_rc)"
+        record_error "$(cat "$_up_out" 2>/dev/null)"
+        rm -f "$_up_out"
+        /sbin/log_tool -t2 -uSystem -p127.0.0.1 -mlocalhost -a "Netbird VPN failed to connect (rc=$_rc)"
+        return 1
+    fi
+
+    rm -f "$_up_out"
+    clear_error
+    log "'netbird up' succeeded"
 
     /sbin/log_tool -t1 -uSystem -p127.0.0.1 -mlocalhost -a "Netbird VPN service started"
     log "=== START COMPLETE ==="
@@ -242,6 +345,7 @@ case "$1" in
         if [ -f "$PIDF" ] && kill -0 "$(cat "$PIDF")" 2>/dev/null; then
             echo "$QPKG_NAME is running (PID: $(cat "$PIDF"))"
             "$NETBIRD_BIN" status 2>/dev/null
+            exit 0
         else
             echo "$QPKG_NAME is not running."
             exit 1
@@ -250,6 +354,7 @@ case "$1" in
     remove)
         stop_service
         rm -f /usr/local/bin/netbird 2>/dev/null
+        exit 0
         ;;
     *)
         echo "Usage: $0 {start|stop|restart|status|remove}"
@@ -257,4 +362,6 @@ case "$1" in
         ;;
 esac
 
-exit 0
+# Propagate the outcome. This used to be an unconditional "exit 0", so a start
+# that failed to bring the tunnel up still reported success to QTS.
+exit $?

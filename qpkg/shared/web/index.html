@@ -7,31 +7,43 @@
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f6fa; color: #333; }
-  .container { max-width: 640px; margin: 40px auto; padding: 0 20px; }
+  .container { max-width: 720px; margin: 40px auto; padding: 0 20px 60px; }
   h1 { font-size: 24px; margin-bottom: 4px; }
   .subtitle { color: #666; margin-bottom: 24px; font-size: 14px; }
   .card { background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 24px; margin-bottom: 20px; }
-  .card h2 { font-size: 16px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid #eee; }
+  .card h2 { font-size: 16px; margin-bottom: 4px; }
+  .card .card-note { font-size: 12px; color: #888; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid #eee; }
+  .card h2.plain { margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid #eee; }
   .field { margin-bottom: 16px; }
   .field:last-child { margin-bottom: 0; }
   label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; color: #555; }
   label .hint { font-weight: 400; color: #999; }
-  input[type="text"], select { width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
-  input[type="text"]:focus, select:focus { outline: none; border-color: #4a90d9; box-shadow: 0 0 0 2px rgba(74,144,217,0.2); }
-  .actions { display: flex; gap: 10px; margin-top: 8px; }
+  label code { font-weight: 400; color: #7a7a7a; font-family: "SF Mono", Monaco, monospace; font-size: 11px; }
+  input[type="text"], input[type="password"], select { width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; background: #fff; }
+  input:focus, select:focus { outline: none; border-color: #4a90d9; box-shadow: 0 0 0 2px rgba(74,144,217,0.2); }
+  .actions { display: flex; gap: 10px; margin-top: 8px; align-items: center; }
   button { padding: 10px 20px; border: none; border-radius: 4px; font-size: 14px; cursor: pointer; font-weight: 500; }
   .btn-save { background: #4a90d9; color: #fff; }
   .btn-save:hover { background: #3a7bc8; }
   .btn-restart { background: #e8e8e8; color: #333; }
   .btn-restart:hover { background: #ddd; }
-  .btn-save:disabled, .btn-restart:disabled { opacity: 0.5; cursor: not-allowed; }
-  .status-bar { padding: 16px; border-radius: 8px; margin-bottom: 20px; font-size: 13px; }
-  .status-bar.connected { background: #e8f5e9; border: 1px solid #a5d6a7; }
-  .status-bar.disconnected { background: #fff3e0; border: 1px solid #ffcc80; }
-  .status-bar.error { background: #ffebee; border: 1px solid #ef9a9a; }
-  .status-bar pre { margin-top: 8px; white-space: pre-wrap; font-size: 12px; color: #555; font-family: "SF Mono", Monaco, monospace; }
-  .status-label { font-weight: 600; }
-  .toast { position: fixed; bottom: 20px; right: 20px; padding: 12px 20px; border-radius: 6px; color: #fff; font-size: 14px; opacity: 0; transition: opacity 0.3s; z-index: 100; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .status-bar { padding: 16px; border-radius: 8px; margin-bottom: 20px; font-size: 13px; border: 1px solid transparent; }
+  .status-bar.connected { background: #e8f5e9; border-color: #a5d6a7; }
+  .status-bar.disconnected { background: #fff3e0; border-color: #ffcc80; }
+  .status-bar.error { background: #ffebee; border-color: #ef9a9a; }
+  .status-label { font-weight: 600; font-size: 15px; display: block; margin-bottom: 8px; }
+  .kv { display: grid; grid-template-columns: 140px 1fr; gap: 2px 12px; font-size: 12.5px; }
+  .kv dt { color: #666; }
+  .kv dd { color: #222; word-break: break-all; }
+  .reason { margin-top: 10px; padding: 8px 10px; background: rgba(0,0,0,0.05); border-radius: 4px; font-family: "SF Mono", Monaco, monospace; font-size: 11.5px; white-space: pre-wrap; word-break: break-word; }
+  details { margin-top: 10px; }
+  summary { cursor: pointer; font-size: 12px; color: #4a6a8a; }
+  details pre { margin-top: 8px; white-space: pre-wrap; font-size: 11.5px; color: #555; font-family: "SF Mono", Monaco, monospace; }
+  .banner { padding: 12px 14px; border-radius: 6px; font-size: 13px; margin-bottom: 20px; display: none; }
+  .banner.show { display: block; }
+  .banner.warn { background: #fff8e1; border: 1px solid #ffe082; color: #6d4c00; }
+  .toast { position: fixed; bottom: 20px; right: 20px; padding: 12px 20px; border-radius: 6px; color: #fff; font-size: 14px; opacity: 0; transition: opacity 0.3s; z-index: 100; max-width: 420px; }
   .toast.show { opacity: 1; }
   .toast.success { background: #43a047; }
   .toast.error { background: #e53935; }
@@ -43,142 +55,293 @@
   <p class="subtitle">WireGuard-based mesh VPN for your QNAP NAS</p>
 
   <div id="status" class="status-bar disconnected">
-    <span class="status-label">Loading...</span>
+    <span class="status-label">Loading…</span>
   </div>
 
-  <div class="card">
-    <h2>Connection</h2>
-    <div class="field">
-      <label>Setup Key <span class="hint">(required for first registration)</span></label>
-      <input type="text" id="SETUP_KEY" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
-    </div>
-    <div class="field">
-      <label>Management URL <span class="hint">(leave empty for app.netbird.io)</span></label>
-      <input type="text" id="MANAGEMENT_URL" placeholder="https://api.wiretrustee.com:443">
-    </div>
-    <div class="field">
-      <label>Admin URL <span class="hint">(self-hosted only)</span></label>
-      <input type="text" id="ADMIN_URL" placeholder="">
-    </div>
-  </div>
+  <div id="banner" class="banner warn"></div>
 
-  <div class="card">
-    <h2>Options</h2>
-    <div class="field">
-      <label>Hostname <span class="hint">(override NAS hostname)</span></label>
-      <input type="text" id="HOSTNAME" placeholder="my-nas">
-    </div>
-    <div class="field">
-      <label>Log Level</label>
-      <select id="LOG_LEVEL">
-        <option value="">Default (info)</option>
-        <option value="panic">panic</option>
-        <option value="fatal">fatal</option>
-        <option value="error">error</option>
-        <option value="warn">warn</option>
-        <option value="info">info</option>
-        <option value="debug">debug</option>
-        <option value="trace">trace</option>
-      </select>
-    </div>
-    <div class="field">
-      <label>Log File</label>
-      <input type="text" id="LOG_FILE" placeholder="/var/log/netbird.log">
-    </div>
-    <div class="field">
-      <label>Extra Arguments <span class="hint">(passed to netbird up)</span></label>
-      <input type="text" id="EXTRA_ARGS" placeholder="--interface-name wt0">
-    </div>
-  </div>
+  <div id="form"></div>
 
   <div class="actions">
-    <button class="btn-save" onclick="saveConfig()">Save</button>
-    <button class="btn-restart" onclick="restartService()">Save &amp; Restart</button>
+    <button class="btn-save" id="btn-save">Save</button>
+    <button class="btn-restart" id="btn-restart">Save &amp; Restart</button>
   </div>
+  <p class="subtitle" style="margin-top:10px">
+    Saving only writes the config file. Settings reach Netbird on restart, which
+    runs <code>netbird down</code> then <code>netbird up</code> — the tunnel drops for a few seconds.
+  </p>
 </div>
 
 <div id="toast" class="toast"></div>
 
 <script>
 const API = '/cgi-bin/netbird-api.cgi';
-const FIELDS = ['SETUP_KEY','MANAGEMENT_URL','ADMIN_URL','HOSTNAME','LOG_LEVEL','LOG_FILE','EXTRA_ARGS'];
+
+// Mirrors NB_OPTION_TABLE in netbird-common.sh. Keys must match exactly.
+// type 'bool' renders a tri-state select: empty means "leave netbird's current
+// setting alone", which is not the same as false.
+const SECTIONS = [
+  {
+    title: 'Connection',
+    fields: [
+      {k:'SETUP_KEY', l:'Setup Key', t:'password', h:'required for first registration'},
+      {k:'MANAGEMENT_URL', l:'Management URL', t:'text', ph:'https://api.netbird.io:443',
+       h:'include the scheme; empty uses NetBird cloud'},
+      {k:'ADMIN_URL', l:'Admin URL', t:'text', h:'self-hosted only'},
+      {k:'HOSTNAME', l:'Hostname', t:'text', ph:'my-nas', h:'empty uses the NAS hostname'},
+      {k:'PRESHARED_KEY', l:'Pre-shared Key', t:'password', h:'optional WireGuard PSK'}
+    ]
+  },
+  {
+    title: 'SSH server',
+    note: 'Netbird’s built-in SSH server, reachable from other peers with "netbird ssh". Netbird treats a never-configured SSH server as enabled, so leaving these unset does not turn it off.',
+    fields: [
+      {k:'ALLOW_SERVER_SSH', l:'Allow SSH server', t:'bool', f:'--allow-server-ssh'},
+      {k:'ENABLE_SSH_ROOT', l:'Allow root login', t:'bool', f:'--enable-ssh-root'},
+      {k:'ENABLE_SSH_SFTP', l:'Enable SFTP subsystem', t:'bool', f:'--enable-ssh-sftp'},
+      {k:'ENABLE_SSH_LOCAL_PORT_FORWARDING', l:'Local port forwarding', t:'bool', f:'--enable-ssh-local-port-forwarding'},
+      {k:'ENABLE_SSH_REMOTE_PORT_FORWARDING', l:'Remote port forwarding', t:'bool', f:'--enable-ssh-remote-port-forwarding'},
+      {k:'DISABLE_SSH_AUTH', l:'Disable SSH authentication', t:'bool', f:'--disable-ssh-auth',
+       h:'any peer that can reach this NAS gets a shell'},
+      {k:'SSH_JWT_CACHE_TTL', l:'SSH JWT cache TTL', t:'text', f:'--ssh-jwt-cache-ttl', ph:'0', h:'seconds; 0 disables caching'}
+    ]
+  },
+  {
+    title: 'Network',
+    fields: [
+      {k:'INTERFACE_NAME', l:'Interface name', t:'text', f:'--interface-name', ph:'wt0'},
+      {k:'WIREGUARD_PORT', l:'WireGuard port', t:'text', f:'--wireguard-port', ph:'51820'},
+      {k:'MTU', l:'MTU', t:'text', f:'--mtu'},
+      {k:'NETWORK_MONITOR', l:'Network monitor', t:'bool', f:'--network-monitor',
+       h:'reconnect when the network changes'},
+      {k:'DISABLE_AUTO_CONNECT', l:'Disable auto-connect', t:'bool', f:'--disable-auto-connect'},
+      {k:'EXTRA_IFACE_BLACKLIST', l:'Extra interface blacklist', t:'text', f:'--extra-iface-blacklist', h:'comma-separated'},
+      {k:'DNS_RESOLVER_ADDRESS', l:'DNS resolver address', t:'text', f:'--dns-resolver-address', ph:'8.8.8.8:53'},
+      {k:'EXTRA_DNS_LABELS', l:'Extra DNS labels', t:'text', f:'--extra-dns-labels', h:'comma-separated'},
+      {k:'DNS_ROUTER_INTERVAL', l:'DNS route interval', t:'text', f:'--dns-router-interval', ph:'1m'},
+      {k:'EXTERNAL_IP_MAP', l:'External IP map', t:'text', f:'--external-ip-map', ph:'1.2.3.4/eth0', h:'comma-separated'}
+    ]
+  },
+  {
+    title: 'Logging',
+    fields: [
+      {k:'LOG_LEVEL', l:'Log level', t:'select',
+       o:[['','Default (info)'],['panic','panic'],['fatal','fatal'],['error','error'],
+          ['warn','warn'],['info','info'],['debug','debug'],['trace','trace']]},
+      {k:'LOG_FILE', l:'Log file', t:'text', ph:'/var/log/netbird.log'}
+    ]
+  },
+  {
+    title: 'Advanced',
+    fields: [
+      {k:'DISABLE_CLIENT_ROUTES', l:'Disable client routes', t:'bool', f:'--disable-client-routes'},
+      {k:'DISABLE_SERVER_ROUTES', l:'Disable server routes', t:'bool', f:'--disable-server-routes'},
+      {k:'DISABLE_DNS', l:'Disable DNS management', t:'bool', f:'--disable-dns'},
+      {k:'DISABLE_FIREWALL', l:'Disable firewall management', t:'bool', f:'--disable-firewall'},
+      {k:'BLOCK_LAN_ACCESS', l:'Block LAN access', t:'bool', f:'--block-lan-access'},
+      {k:'BLOCK_INBOUND', l:'Block inbound connections', t:'bool', f:'--block-inbound'},
+      {k:'DISABLE_IPV6', l:'Disable IPv6 overlay', t:'bool', f:'--disable-ipv6'},
+      {k:'ENABLE_ROSENPASS', l:'Enable Rosenpass', t:'bool', f:'--enable-rosenpass', h:'experimental post-quantum'},
+      {k:'ROSENPASS_PERMISSIVE', l:'Rosenpass permissive', t:'bool', f:'--rosenpass-permissive'},
+      {k:'EXTRA_ARGS', l:'Extra arguments', t:'text', ph:'--foo bar', h:'appended verbatim to netbird up'}
+    ]
+  }
+];
+
+const FIELDS = SECTIONS.reduce((a, s) => a.concat(s.fields), []);
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderForm() {
+  document.getElementById('form').innerHTML = SECTIONS.map(sec => {
+    const head = sec.note
+      ? `<h2>${esc(sec.title)}</h2><p class="card-note">${esc(sec.note)}</p>`
+      : `<h2 class="plain">${esc(sec.title)}</h2>`;
+    return `<div class="card">${head}${sec.fields.map(renderField).join('')}</div>`;
+  }).join('');
+}
+
+function renderField(f) {
+  const bits = [];
+  if (f.f) bits.push(`<code>${esc(f.f)}</code>`);
+  if (f.h) bits.push(esc(f.h));
+  const hint = bits.length ? ` <span class="hint">(${bits.join(' — ')})</span>` : '';
+  const label = `<label for="${esc(f.k)}">${esc(f.l)}${hint}</label>`;
+
+  let control;
+  if (f.t === 'bool') {
+    control = `<select id="${esc(f.k)}">
+      <option value="">Leave unchanged</option>
+      <option value="true">On</option>
+      <option value="false">Off</option>
+    </select>`;
+  } else if (f.t === 'select') {
+    control = `<select id="${esc(f.k)}">${
+      f.o.map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join('')
+    }</select>`;
+  } else {
+    control = `<input type="${f.t === 'password' ? 'password' : 'text'}" id="${esc(f.k)}"${
+      f.ph ? ` placeholder="${esc(f.ph)}"` : ''} autocomplete="off" spellcheck="false">`;
+  }
+  return `<div class="field">${label}${control}</div>`;
+}
 
 function toast(msg, type) {
   const el = document.getElementById('toast');
   el.textContent = msg;
   el.className = 'toast show ' + type;
-  setTimeout(() => el.className = 'toast', 3000);
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { el.className = 'toast'; }, 6000);
 }
 
-async function api(action, body) {
-  const opts = body
-    ? { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({action, ...body}) }
-    : { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({action}) };
-  const res = await fetch(API, opts);
+function banner(msg) {
+  const el = document.getElementById('banner');
+  if (!msg) { el.className = 'banner warn'; el.textContent = ''; return; }
+  el.textContent = msg;
+  el.className = 'banner warn show';
+}
+
+async function api(action, extra) {
+  const res = await fetch(API, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(Object.assign({action}, extra || {}))
+  });
   return res.json();
+}
+
+function collect() {
+  const out = {};
+  FIELDS.forEach(f => {
+    const el = document.getElementById(f.k);
+    if (el) out[f.k] = el.value;
+  });
+  return out;
 }
 
 async function loadConfig() {
   try {
     const data = await api('load');
-    if (data.config) {
+    if (data && data.config) {
       FIELDS.forEach(f => {
-        const el = document.getElementById(f);
-        if (el) el.value = data.config[f] || '';
+        const el = document.getElementById(f.k);
+        if (el) el.value = data.config[f.k] || '';
       });
+    } else {
+      toast((data && data.error) || 'Failed to load settings', 'error');
     }
-  } catch(e) {
-    toast('Failed to load config', 'error');
+  } catch (e) {
+    toast('Failed to load settings', 'error');
   }
+}
+
+// Reads netbird's own status JSON. The daemon status is deliberately NOT the
+// signal used for the badge: it reads "Connected" whenever the daemon process
+// is alive, including while Management is down.
+function renderStatus(data) {
+  const el = document.getElementById('status');
+  const s = data && data.status;
+
+  if (!s) {
+    el.className = 'status-bar error';
+    el.innerHTML = '<span class="status-label">Netbird service is not running</span>'
+      + (data && data.lastError ? `<div class="reason">${esc(data.lastError)}</div>` : '')
+      + (data && data.text ? `<details><summary>Details</summary><pre>${esc(data.text)}</pre></details>` : '');
+    return;
+  }
+
+  const mgmt = s.management || {};
+  const signal = s.signal || {};
+  const relays = s.relays || {};
+  const peers = s.peers || {};
+  const ssh = s.sshServer || {};
+  const ok = mgmt.connected === true;
+
+  el.className = 'status-bar ' + (ok ? 'connected' : 'disconnected');
+
+  const rows = [
+    ['Management', (mgmt.connected ? 'Connected' : 'Disconnected') + (mgmt.url ? ' — ' + mgmt.url : '')],
+    ['Signal', (signal.connected ? 'Connected' : 'Disconnected') + (signal.url ? ' — ' + signal.url : '')],
+    ['Daemon', s.daemonStatus || 'unknown'],
+    ['FQDN', s.fqdn || '—'],
+    ['NetBird IP', s.netbirdIp || '—'],
+    ['Peers', `${peers.connected || 0}/${peers.total || 0} connected`],
+    ['Relays', `${relays.available || 0}/${relays.total || 0} available`],
+    ['SSH server', ssh.enabled ? 'Enabled' : 'Disabled'],
+    ['Version', s.daemonVersion || '—']
+  ];
+
+  el.innerHTML =
+    `<span class="status-label">${ok ? 'Connected' : 'Not connected'}</span>`
+    + `<dl class="kv">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>`
+    + (mgmt.error ? `<div class="reason">Management: ${esc(mgmt.error)}</div>` : '')
+    + (signal.error ? `<div class="reason">Signal: ${esc(signal.error)}</div>` : '')
+    + (data.lastError ? `<div class="reason">Last start: ${esc(data.lastError)}</div>` : '')
+    + (data.text ? `<details><summary>Full status output</summary><pre>${esc(data.text)}</pre></details>` : '');
 }
 
 async function loadStatus() {
   try {
-    const data = await api('status');
-    const el = document.getElementById('status');
-    const connected = data.status && data.status.includes('Connected');
-    el.className = 'status-bar ' + (connected ? 'connected' : 'disconnected');
-    el.innerHTML = '<span class="status-label">' + (connected ? 'Connected' : 'Disconnected') + '</span>'
-      + (data.status ? '<pre>' + data.status.replace(/</g,'&lt;') + '</pre>' : '');
-  } catch(e) {
+    renderStatus(await api('status'));
+  } catch (e) {
     const el = document.getElementById('status');
     el.className = 'status-bar error';
-    el.innerHTML = '<span class="status-label">Unable to reach service</span>';
+    el.innerHTML = '<span class="status-label">Unable to reach the Netbird API</span>';
   }
 }
 
+function setBusy(busy) {
+  document.getElementById('btn-save').disabled = busy;
+  document.getElementById('btn-restart').disabled = busy;
+}
+
+async function save() {
+  banner('');
+  const data = await api('save', collect());
+  if (!data || !data.ok) {
+    toast((data && data.error) || 'Save failed', 'error');
+    return false;
+  }
+  if (data.warning) banner(data.warning);
+  return true;
+}
+
 async function saveConfig() {
-  const config = {};
-  FIELDS.forEach(f => config[f] = document.getElementById(f).value);
+  setBusy(true);
   try {
-    document.querySelector('.btn-save').disabled = true;
-    const data = await api('save', {config});
-    if (data.ok) toast('Settings saved', 'success');
-    else toast(data.error || 'Save failed', 'error');
-  } catch(e) {
+    if (await save()) toast('Settings saved. Restart to apply them.', 'success');
+  } catch (e) {
     toast('Save failed', 'error');
   } finally {
-    document.querySelector('.btn-save').disabled = false;
+    setBusy(false);
   }
 }
 
 async function restartService() {
-  const config = {};
-  FIELDS.forEach(f => config[f] = document.getElementById(f).value);
+  setBusy(true);
   try {
-    document.querySelector('.btn-restart').disabled = true;
-    const save = await api('save', {config});
-    if (!save.ok) { toast(save.error || 'Save failed', 'error'); return; }
-    toast('Restarting...', 'success');
-    await api('restart');
-    setTimeout(loadStatus, 3000);
-  } catch(e) {
+    if (!(await save())) return;
+    const r = await api('restart');
+    if (!r || !r.ok) { toast((r && r.error) || 'Restart failed', 'error'); return; }
+    toast('Restarting — applying settings with netbird down + up…', 'success');
+    // Poll more often while the restart is in flight.
+    for (let i = 0; i < 12; i++) {
+      await new Promise(r => setTimeout(r, 5000));
+      await loadStatus();
+    }
+  } catch (e) {
     toast('Restart failed', 'error');
   } finally {
-    document.querySelector('.btn-restart').disabled = false;
+    setBusy(false);
   }
 }
 
+renderForm();
+document.getElementById('btn-save').addEventListener('click', saveConfig);
+document.getElementById('btn-restart').addEventListener('click', restartService);
 loadConfig();
 loadStatus();
 setInterval(loadStatus, 15000);

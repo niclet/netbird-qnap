@@ -2,6 +2,17 @@
 # Netbird VPN QPKG - package install/remove routines
 ######################################################################
 
+# Returns success when the given config file carries a non-empty SETUP_KEY.
+# Sourced in a subshell so the caller's environment is untouched.
+netbird_has_setup_key() {
+    [ -f "$1" ] || return 1
+    (
+        SETUP_KEY=""
+        . "$1" >/dev/null 2>&1
+        [ -n "$SETUP_KEY" ]
+    )
+}
+
 pkg_pre_install() {
     true
 }
@@ -9,6 +20,7 @@ pkg_pre_install() {
 pkg_post_install() {
     CONF=/etc/config/qpkg.conf
     QPKG_ROOT=$(/sbin/getcfg $QPKG_NAME Install_Path -f ${CONF})
+    NETBIRD_CONF="${QPKG_ROOT}/netbird.conf"
 
     chmod +x "${QPKG_ROOT}/netbird"
     chmod +x "${QPKG_ROOT}/netbird.sh"
@@ -18,14 +30,21 @@ pkg_post_install() {
     pkill -f "busybox httpd -p 58090" 2>/dev/null
     pkill -f "busybox httpd -p 8090" 2>/dev/null
 
-    # Preserve user config across upgrades
-    if [ ! -f "${QPKG_ROOT}/netbird.conf" ] || [ ! -s "${QPKG_ROOT}/netbird.conf" ]; then
-        if [ -f "${QPKG_ROOT}/netbird.conf.default" ]; then
-            cp "${QPKG_ROOT}/netbird.conf.default" "${QPKG_ROOT}/netbird.conf"
+    # netbird.conf is now tracked through QPKG_CONFIG, which preserves user
+    # edits across upgrades. The very first install that adopts it has no
+    # recorded md5 for the file, so QDK sets the existing one aside as
+    # .qdkorig and lays down the stock template. Put the real settings back.
+    # .qdksave is the same situation on a later upgrade whose template changed.
+    for _saved in "${NETBIRD_CONF}.qdkorig" "${NETBIRD_CONF}.qdksave"; do
+        [ -f "$_saved" ] || continue
+        if ! netbird_has_setup_key "$NETBIRD_CONF" && netbird_has_setup_key "$_saved"; then
+            cp -p "$_saved" "$NETBIRD_CONF"
+            /sbin/log_tool -t1 -uSystem -p127.0.0.1 -mlocalhost \
+                -a "Netbird VPN restored existing settings from $(basename "$_saved")"
         fi
-    fi
+    done
 
-    chmod 666 "${QPKG_ROOT}/netbird.conf" 2>/dev/null
+    chmod 666 "$NETBIRD_CONF" 2>/dev/null
     mkdir -p /etc/netbird 2>/dev/null
     /sbin/log_tool -t1 -uSystem -p127.0.0.1 -mlocalhost -a "Netbird VPN QPKG installed"
 }

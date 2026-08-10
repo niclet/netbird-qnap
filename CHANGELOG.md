@@ -546,3 +546,173 @@ qpkg/shared/netbird.conf                 -- Config file template
 qpkg/shared/web/index.html              -- Settings UI (single-page HTML/JS)
 qpkg/shared/web/cgi-bin/netbird-api.cgi  -- CGI API for settings UI
 ```
+
+---
+
+## Settings never reached Netbird; full `netbird up` options added
+
+**Date:** 2026-08-09
+**Upstream verified against:** netbird `v0.76.2`
+
+### Symptom
+
+`netbird status` on the NAS:
+
+```
+Connected
+
+OS: linux/amd64
+Daemon version: 0.76.2
+Management: Disconnected, reason: failed getting Management Service public key:
+  rpc error: code = Unknown desc = unexpected HTTP status code received from
+  server: 308 (Permanent Redirect); malformed header: missing HTTP content-type
+```
+
+Setting a correct `https://` management URL on the settings page changed nothing,
+and the package still reported a successful start.
+
+### Root cause
+
+Four defects stacked on top of each other.
+
+1. **`netbird up` discards config when the daemon is already connected.**
+   `client/cmd/up.go:305`:
+
+   ```go
+   if status.Status == string(internal.StatusConnected) {
+       if !profileSwitched {
+           cmd.Println("Already connected")
+           return nil          // returns BEFORE client.SetConfig(ctx, req)
+       }
+   ```
+
+   `SetConfig` — which carries `ManagementUrl` and every SSH flag — is below that
+   return. `StatusConnected` is the *daemon* status, which reads Connected even
+   while Management is down.
+
+2. **`start_service` raced the daemon's auto-connect.** It started the daemon,
+   waited for the socket, then ran bare `netbird up`. The daemon auto-connects
+   from its stored profile on start (`DisableAutoConnect` defaults false), so
+   `up` almost always hit the early return above. Settings were passed via `NB_*`
+   environment variables, which do reach the flags
+   (`SetFlagsFromEnvVars`, `client/cmd/root.go:236`) but are discarded by the same
+   early return.
+
+3. **Failure was invisible.** `netbird up`'s exit code was ignored, the script
+   logged `=== START COMPLETE ===` unconditionally, and the script ended in a
+   hardcoded `exit 0` — so QTS saw success even when the tunnel never came up.
+   The settings page decided its badge with `status.includes('Connected')`, which
+   matches the daemon-status line, so it was green throughout.
+
+4. **The 308 itself** came from the Caddy edge in front of the self-hosted
+   management server: a plain-HTTP gRPC POST returns `308 Permanent Redirect`
+   with no `Content-Type`, which is verbatim what grpc-go reports. The peer's
+   stored profile held a `http://` URL and nothing could overwrite it because of
+   (1)–(3).
+
+Two more defects found while tracing:
+
+- **Upgrades wiped the config.** `netbird.conf` shipped in `qpkg/shared/`, so QDK
+  extracted it over the install directory on every upgrade, resetting `SETUP_KEY`
+  and `MANAGEMENT_URL`. The `netbird.conf.default` guard in `package_routines` ran
+  *after* extraction and referenced a file nothing ever produced — dead code.
+- **`HOSTNAME` leaked from the environment.** `netbird.conf` was sourced straight
+  into the service script, and QTS always has `HOSTNAME` set, so the NAS hostname
+  was passed as `NB_HOSTNAME` even with the setting blank.
+
+### Changes
+
+**New `qpkg/shared/netbird-common.sh`** — one option table (`NB_OPTION_TABLE`)
+shared by the service script and the CGI, plus config load/write, shell quoting,
+boolean normalisation, URL validation and JSON escaping.
+
+**`qpkg/shared/netbird.sh`**
+- Runs `netbird down` before `netbird up`, always. This is the actual fix.
+- Builds an explicit argv from the config file instead of relying on `NB_*`
+  environment variables, so the config file — not the stored profile — is
+  authoritative. Setup key and pre-shared key are redacted from the log.
+- Booleans are tri-state: only `true`/`false` emit a flag. Empty emits nothing,
+  because netbird treats an unset `ServerSSHAllowed` as *enabled* and blindly
+  sending `--allow-server-ssh=false` would disable SSH on existing peers.
+- Checks `netbird up`'s exit code, records the output to `${QPKG_ROOT}/last-error`,
+  and no longer logs `START COMPLETE` on failure.
+- `exit $?` instead of `exit 0`.
+- Runs `netbird up` under `timeout` (syntax probed at runtime — BusyBox changed
+  from `timeout -t SEC` to `timeout SEC`) so an unexpected interactive SSO flow
+  cannot hang the QPKG start. `QPKG_TIMEOUT` start raised 60s → 150s to match.
+- Skips `up` entirely when there is no setup key *and* the peer is unregistered,
+  which is the only case where `up` would block on SSO.
+- Config values are read into namespaced `NBQ_*` variables via a subshell that
+  unsets every key first, killing the `HOSTNAME` leak.
+
+**`qpkg/config/netbird.conf`** (moved from `qpkg/shared/`) + `qpkg/qpkg.cfg`
+- Declared `QPKG_CONFIG="netbird.conf"` / `QDK_DATA_DIR_CONFIG="config"`, so QDK
+  md5-tracks the file and upgrades preserve user edits.
+- `package_routines` restores `netbird.conf.qdkorig` / `.qdksave` on the first
+  upgrade that adopts `QPKG_CONFIG`, which is when QDK sets the old file aside.
+  The dead `.default` branch is gone.
+- Template documents all 34 options, including that empty ≠ false for booleans.
+- Default management URL corrected to `https://api.netbird.io:443`;
+  `api.wiretrustee.com` has been serving an expired `*.netbird.io` certificate
+  since 2026-04-27.
+
+**`qpkg/shared/web/cgi-bin/netbird-api.cgi`**
+- `do_status` returns `netbird status --json` verbatim plus the detail text and
+  `last-error`, instead of substring-matching the human-readable output.
+- `do_save` iterates the shared option table, so new options need no CGI change.
+  Validates URLs (scheme required), integers and booleans; warns — without
+  blocking — on a plain `http://` management URL, naming the 308 it causes.
+- Values are written single-quoted, so a `"`, `` ` `` or `$` in a field can no
+  longer corrupt the config or inject into the service script.
+- A request carrying only some fields updates only those fields.
+- JSON string extraction moved from sed to awk: the regex that steps over escaped
+  quotes needs BRE alternation (`\|`), a GNU extension that BSD sed rejects.
+
+**`qpkg/shared/web/index.html`**
+- Status panel reads the JSON. The badge comes from `management.connected`, and
+  `management.error` is shown verbatim — the 308 is now on screen.
+  Also surfaces signal, relays, peers, FQDN, NetBird IP and SSH-server state.
+- Form is generated from a schema mirroring `NB_OPTION_TABLE`: Connection, SSH
+  server, Network, Logging, Advanced. Booleans render as *Leave unchanged / On /
+  Off*. Each field shows the `netbird up` flag it maps to.
+- New options: `--allow-server-ssh`, `--enable-ssh-root`, `--enable-ssh-sftp`,
+  `--enable-ssh-local-port-forwarding`, `--enable-ssh-remote-port-forwarding`,
+  `--disable-ssh-auth`, `--ssh-jwt-cache-ttl`, `--interface-name`,
+  `--wireguard-port`, `--mtu`, `--network-monitor`, `--disable-auto-connect`,
+  `--extra-iface-blacklist`, `--dns-resolver-address`, `--extra-dns-labels`,
+  `--dns-router-interval`, `--external-ip-map`, `--preshared-key`,
+  `--disable-client-routes`, `--disable-server-routes`, `--disable-dns`,
+  `--disable-firewall`, `--block-lan-access`, `--block-inbound`, `--disable-ipv6`,
+  `--enable-rosenpass`, `--rosenpass-permissive`.
+
+### Verification
+
+- All 31 emitted flags grepped against `client/cmd/{root,up,ssh,system}.go` at
+  netbird `v0.76.2`.
+- The UI schema, the shell option table and the config template were
+  cross-checked: 34 keys each, no strays, boolean typing agrees.
+- Shell behaviour tested under `dash`: config round-trip, `HOSTNAME` non-leak,
+  argv construction, secret redaction, and that a `$(...)` in a config value is
+  stored and passed verbatim rather than executed.
+- Service script exercised end to end against a stubbed netbird: `down` precedes
+  `up`; a failed `up` returns non-zero, records `last-error`, and does not log
+  `START COMPLETE`; an unregistered peer with no setup key skips `up`.
+- CGI exercised end to end: validation rejects a scheme-less URL without writing,
+  `http://` saves with the 308 warning, partial saves preserve other fields, and
+  the status response stays valid JSON with quotes, backslashes and newlines in it.
+
+### Files
+
+```
+.github/workflows/build.yml              -- CI pipeline
+build-qpkg.sh                            -- QDK setup and qbuild wrapper
+repo.xml                                 -- QNAP App Center repository manifest
+CHANGELOG.md                             -- This file
+qpkg/qpkg.cfg                            -- QPKG metadata, web UI, QPKG_CONFIG
+qpkg/package_routines                    -- Install/remove hooks
+qpkg/config/netbird.conf                 -- Config template (upgrade-preserved)
+qpkg/shared/netbird-common.sh            -- Shared option table and helpers
+qpkg/shared/netbird.sh                   -- Service start/stop/restart script
+qpkg/shared/web/index.html               -- Settings UI (single-page HTML/JS)
+qpkg/shared/web/cgi-bin/netbird-api.cgi  -- CGI API for the settings UI
+```
