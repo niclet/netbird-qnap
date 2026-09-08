@@ -10,8 +10,11 @@ qpkg/x86_64/netbird
 qpkg/build/
 qpkg/QDK
 
-# Generated icons (built in CI from upstream logo)
-qpkg/icons/*.png
+# Committed brand icons (netbird_80.png, netbird_100.png) are tracked so the
+# App Center repo.xml icon URLs resolve on the main branch. CI regenerates them
+# from the upstream logo at build time but does not commit them. The grayscale
+# disabled-state icon is CI-only.
+qpkg/icons/netbird_gray.png
 
 # OS artifacts
 .DS_Store

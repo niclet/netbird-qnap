@@ -101,23 +101,36 @@ jobs:
           go-version: ${{ steps.goversion.outputs.version }}
           cache: false
 
-      - name: Build static binary
+      - name: Build static binaries (all QNAP arches)
         run: |
-          mkdir -p qpkg/x86_64
           cd src
           VERSION="${{ needs.check-version.outputs.version }}"
           VERSION_STRIPPED="${VERSION#v}"
+          LDFLAGS="-s -w -X github.com/netbirdio/netbird/version.version=${VERSION_STRIPPED}"
 
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-            go build \
-              -ldflags "-s -w -X github.com/netbirdio/netbird/version.version=${VERSION_STRIPPED}" \
-              -o ../qpkg/x86_64/netbird \
-              ./client/
+          # QNAP arch dir : GOARCH [GOARM]. ARMv7 (arm-x31 vfpv3 / arm-x41 vfpv3+vfpv4)
+          # both take the same GOARM=7 static binary; QNAP only distinguishes toolchain.
+          build() {
+            local dir="$1" goarch="$2" goarm="${3:-}"
+            mkdir -p "../qpkg/${dir}"
+            echo "Building ${dir} (GOARCH=${goarch} GOARM=${goarm:-n/a})"
+            CGO_ENABLED=0 GOOS=linux GOARCH="${goarch}" GOARM="${goarm}" \
+              go build -ldflags "${LDFLAGS}" -o "../qpkg/${dir}/netbird" ./client/
+          }
 
-      - name: Verify binary
+          build x86_64 amd64
+          build arm_64 arm64
+          build arm-x41 arm 7
+          # arm-x31 shares the ARMv7 binary
+          cp ../qpkg/arm-x41/netbird ../qpkg/arm-x31/netbird
+
+      - name: Verify binaries
         run: |
-          file qpkg/x86_64/netbird
-          ls -lh qpkg/x86_64/netbird
+          for dir in x86_64 arm_64 arm-x41 arm-x31; do
+            echo "== qpkg/${dir}/netbird =="
+            file "qpkg/${dir}/netbird"
+            ls -lh "qpkg/${dir}/netbird"
+          done
 
       - name: Update QPKG version
         run: |
@@ -132,6 +145,7 @@ jobs:
           mkdir -p qpkg/icons
           if [ -f src/docs/media/logo.png ]; then
             convert src/docs/media/logo.png -resize 80x80 qpkg/icons/netbird_80.png
+            convert src/docs/media/logo.png -resize 100x100 qpkg/icons/netbird_100.png
             convert src/docs/media/logo.png -resize 64x64 -colorspace Gray qpkg/icons/netbird_gray.png
           else
             echo "Warning: upstream logo not found, icons will be missing"
@@ -140,26 +154,33 @@ jobs:
       - name: Build QPKG
         run: ./build-qpkg.sh
 
-      - name: Locate built QPKG
-        id: qpkg
+      - name: Collect QPKGs, stable-named copies, and checksums
         run: |
-          QPKG_FILE=$(find qpkg/build -name "*.qpkg" -type f | head -1)
-          if [ -z "$QPKG_FILE" ]; then
-            echo "Error: No .qpkg file found"
+          BUILD_DIR=qpkg/build
+          mapfile -t FILES < <(find "$BUILD_DIR" -name "netbird_*.qpkg" -type f | sort)
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "Error: No .qpkg file found in $BUILD_DIR"
             exit 1
           fi
-          echo "file=$QPKG_FILE" >> "$GITHUB_OUTPUT"
-          echo "name=$(basename "$QPKG_FILE")" >> "$GITHUB_OUTPUT"
 
-      - name: Create stable-named copy for latest download URL
-        run: |
-          cp "${{ steps.qpkg.outputs.file }}" "$(dirname "${{ steps.qpkg.outputs.file }}")/netbird_x86_64.qpkg"
+          for f in "${FILES[@]}"; do
+            base=$(basename "$f")
+            case "$base" in
+              *_x86_64.qpkg)  arch=x86_64  ;;
+              *_arm_64.qpkg)  arch=arm_64  ;;
+              *_arm-x41.qpkg) arch=arm-x41 ;;
+              *_arm-x31.qpkg) arch=arm-x31 ;;
+              *) echo "Error: cannot determine arch for $base"; exit 1 ;;
+            esac
+            cp "$f" "$BUILD_DIR/netbird_${arch}.qpkg"
+            ( cd "$BUILD_DIR" \
+              && sha256sum "$base" > "${base}.sha256" \
+              && sha256sum "netbird_${arch}.qpkg" > "netbird_${arch}.qpkg.sha256" )
+            echo "Prepared ${arch}: ${base} -> netbird_${arch}.qpkg"
+          done
 
-      - name: Generate checksums
-        run: |
-          cd "$(dirname "${{ steps.qpkg.outputs.file }}")"
-          sha256sum "$(basename "${{ steps.qpkg.outputs.file }}")" > "${{ steps.qpkg.outputs.name }}.sha256"
-          sha256sum netbird_x86_64.qpkg > netbird_x86_64.qpkg.sha256
+          echo "Release directory contents:"
+          ls -lh "$BUILD_DIR"
 
       - name: Upload QPKG artifact
         uses: actions/upload-artifact@v5
@@ -194,22 +215,40 @@ jobs:
           VERSION: ${{ needs.check-version.outputs.release_tag }}
         run: |
           gh release delete "$VERSION" --yes --cleanup-tag 2>/dev/null || true
+
+          # Create the release WITHOUT assets first, then upload separately with
+          # --clobber + retry. Attaching assets in the same `create` call races the
+          # tag/release propagation and intermittently 400s from uploads.github.com.
           gh release create "$VERSION" \
             --title "Netbird QPKG $VERSION" \
             --notes "$(cat <<'EOF'
-          Netbird VPN client packaged as QPKG for QNAP NAS (x86_64).
+          Netbird VPN client packaged as QPKG for QNAP NAS (x86_64, arm_64, arm-x41, arm-x31).
 
           ## Auto-update repository
           Add this URL in QNAP App Center → App Repository:
           `https://zachhandley.github.io/netbird-qnap/repo.xml`
 
           ## Manual installation
-          1. Download the `.qpkg` file below
+          1. Download the `.qpkg` file matching your NAS architecture below
           2. In QNAP App Center, click **Install Manually**
           3. Browse to the downloaded file and install
+
+          Unsigned package: enable App Center → Settings → General →
+          "Allow installation of applications without a valid digital signature".
           EOF
-          )" \
-            dist/*
+          )"
+
+          # Upload assets idempotently, retrying transient upload failures (400/5xx).
+          for attempt in 1 2 3; do
+            if gh release upload "$VERSION" dist/* --clobber; then
+              echo "Assets uploaded on attempt ${attempt}"
+              exit 0
+            fi
+            echo "Upload attempt ${attempt} failed; retrying in $((attempt * 10))s..."
+            sleep $((attempt * 10))
+          done
+          echo "Asset upload failed after 3 attempts"
+          exit 1
 
       - name: Update repo.xml with new version
         env:

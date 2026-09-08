@@ -90,9 +90,19 @@ You can also force a rebuild at any time via `workflow_dispatch`, optionally spe
 
 ### Prerequisites
 
-- A QNAP NAS running QTS (x86_64 architecture)
+- A QNAP NAS running QTS/QuTS hero. Supported architectures: **x86_64** (Intel/AMD),
+  **arm_64** (AArch64/ARMv8), and **arm-x41 / arm-x31** (ARMv7). The App Repository picks the
+  matching build automatically; for a manual install, download the `.qpkg` for your arch.
 - SSH access to the NAS (for initial setup) or the QNAP web UI
 - A Netbird account with a setup key (from [app.netbird.io](https://app.netbird.io/) or your self-hosted management server)
+
+### A note on the "digital signature" warning
+
+These packages are **not signed by QNAP**. QNAP's App Center only trusts a signature issued
+through QNAP's own code-signing service, so a self-signed package would warn just the same. To
+install an unsigned package, enable **App Center → Settings → General → "Allow installation of
+applications without a valid digital signature"** (off by default). The App Repository install
+(Option A) and manual install (Option B) both require this while the package remains unsigned.
 
 ### Option A: Add the app repository (recommended, auto-updates)
 
