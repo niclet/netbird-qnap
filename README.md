@@ -110,7 +110,7 @@ applications without a valid digital signature"** (off by default). The App Repo
 2. Click the gear icon (upper right) and go to **App Repository**
 3. Add this URL:
    ```
-   https://zachhandley.github.io/netbird-qnap/repo.xml
+   https://niclet.github.io/netbird-qnap/repo.xml
    ```
 4. Netbird VPN will appear in your App Center -- install it from there
 5. Future updates are automatic through the App Center

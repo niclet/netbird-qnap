@@ -139,18 +139,6 @@ jobs:
           QPKG_VER=$(echo "${RELEASE_TAG#v}" | tr '-' '.')
           sed -i "s/^QPKG_VER=.*/QPKG_VER=\"${QPKG_VER}\"/" qpkg/qpkg.cfg
 
-      - name: Generate icons from upstream logo
-        run: |
-          sudo apt-get install -y imagemagick
-          mkdir -p qpkg/icons
-          if [ -f src/docs/media/logo.png ]; then
-            convert src/docs/media/logo.png -resize 80x80 qpkg/icons/netbird_80.png
-            convert src/docs/media/logo.png -resize 100x100 qpkg/icons/netbird_100.png
-            convert src/docs/media/logo.png -resize 64x64 -colorspace Gray qpkg/icons/netbird_gray.png
-          else
-            echo "Warning: upstream logo not found, icons will be missing"
-          fi
-
       - name: Build QPKG
         run: ./build-qpkg.sh
 
@@ -226,7 +214,7 @@ jobs:
 
           ## Auto-update repository
           Add this URL in QNAP App Center → App Repository:
-          `https://zachhandley.github.io/netbird-qnap/repo.xml`
+          `https://niclet.github.io/netbird-qnap/repo.xml`
 
           ## Manual installation
           1. Download the `.qpkg` file matching your NAS architecture below

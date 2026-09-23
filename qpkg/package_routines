@@ -59,6 +59,13 @@ PKG_PRE_REMOVE="{
 
 PKG_POST_REMOVE="{
     rm -f /usr/local/bin/netbird 2>/dev/null
+    # Current web UI (self-contained busybox httpd, see netbird.sh WEBUI_PORT)
+    if [ -f /var/run/netbird-httpd.pid ]; then
+        kill \"\$(cat /var/run/netbird-httpd.pid)\" 2>/dev/null
+        rm -f /var/run/netbird-httpd.pid
+    fi
+    pkill -f 'busybox httpd -f -p 8095 ' 2>/dev/null
+    # Leftovers from older releases' Apache-based web UI
     rm -f /etc/container-proxy.d/netbird.conf 2>/dev/null
     rm -f /etc/default_config/apache-netbird.conf 2>/dev/null
     for _pf in /etc/config/apache/extra/apache-proxy.conf /etc/default_config/apache/extra/apache-proxy.conf; do

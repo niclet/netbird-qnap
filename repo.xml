@@ -6,30 +6,79 @@
     <internalName>netbird</internalName>
     <category>Essentials</category>
     <type>Networking</type>
-    <icon100>https://raw.githubusercontent.com/ZachHandley/netbird-qnap/main/qpkg/icons/netbird_100.png</icon100>
-    <icon80>https://raw.githubusercontent.com/ZachHandley/netbird-qnap/main/qpkg/icons/netbird_80.png</icon80>
+    <icon100>https://raw.githubusercontent.com/niclet/netbird-qnap/main/qpkg/icons/netbird_100.png</icon100>
+    <icon80>https://raw.githubusercontent.com/niclet/netbird-qnap/main/qpkg/icons/netbird_80.png</icon80>
     <description>WireGuard-based mesh VPN client for Netbird networks. Connects your QNAP NAS to your Netbird mesh network with full kernel-level WireGuard, firewall, and route management.</description>
-    <developer>ZachHandley</developer>
-    <developerLink>https://github.com/ZachHandley/netbird-qnap</developerLink>
+    <developer>niclet</developer>
+    <developerLink>https://github.com/niclet/netbird-qnap</developerLink>
     <fwVersion>4.3.0</fwVersion>
     <version>0.0.0</version>
+    <!-- platformID must be a QNAP model-family code, not an architecture
+         string. QTS App Center matches this against the NAS's own platform
+         code; "x86_64"/"arm_64"/etc. never match anything, which is why the
+         repo failed to be recognized when added. TS-NASX86 is the single
+         family code covering every Intel/AMD (x86_64) QNAP model, including
+         the TS-364. The ARM codes below are the family codes for the
+         AArch64, Cortex-A9(-class) and Cortex-A15(-class) QNAP lines
+         respectively (cross-checked against a live, working QNAP App Center
+         feed: https://www.myqnap.org/repo.xml). -->
     <platform>
-      <platformID>x86_64</platformID>
-      <location>https://github.com/ZachHandley/netbird-qnap/releases/latest/download/netbird_x86_64.qpkg</location>
+      <platformID>TS-NASX86</platformID>
+      <location>https://github.com/niclet/netbird-qnap/releases/latest/download/netbird_x86_64.qpkg</location>
     </platform>
     <platform>
-      <platformID>arm_64</platformID>
-      <location>https://github.com/ZachHandley/netbird-qnap/releases/latest/download/netbird_arm_64.qpkg</location>
+      <platformID>TS-NASARM_64</platformID>
+      <location>https://github.com/niclet/netbird-qnap/releases/latest/download/netbird_arm_64.qpkg</location>
     </platform>
     <platform>
-      <platformID>arm-x41</platformID>
-      <location>https://github.com/ZachHandley/netbird-qnap/releases/latest/download/netbird_arm-x41.qpkg</location>
+      <platformID>TS-X16</platformID>
+      <location>https://github.com/niclet/netbird-qnap/releases/latest/download/netbird_arm_64.qpkg</location>
     </platform>
     <platform>
-      <platformID>arm-x31</platformID>
-      <location>https://github.com/ZachHandley/netbird-qnap/releases/latest/download/netbird_arm-x31.qpkg</location>
+      <platformID>TS-X28A</platformID>
+      <location>https://github.com/niclet/netbird-qnap/releases/latest/download/netbird_arm_64.qpkg</location>
     </platform>
-    <snapshot>https://raw.githubusercontent.com/ZachHandley/netbird-qnap/main/qpkg/icons/netbird_100.png</snapshot>
-    <forumLink>https://github.com/ZachHandley/netbird-qnap/issues</forumLink>
+    <platform>
+      <platformID>TS-X32</platformID>
+      <location>https://github.com/niclet/netbird-qnap/releases/latest/download/netbird_arm_64.qpkg</location>
+    </platform>
+    <platform>
+      <platformID>TS-X33</platformID>
+      <location>https://github.com/niclet/netbird-qnap/releases/latest/download/netbird_arm_64.qpkg</location>
+    </platform>
+    <platform>
+      <platformID>TS-X35</platformID>
+      <location>https://github.com/niclet/netbird-qnap/releases/latest/download/netbird_arm_64.qpkg</location>
+    </platform>
+    <platform>
+      <platformID>TS-X42</platformID>
+      <location>https://github.com/niclet/netbird-qnap/releases/latest/download/netbird_arm_64.qpkg</location>
+    </platform>
+    <platform>
+      <platformID>TS-XA28A</platformID>
+      <location>https://github.com/niclet/netbird-qnap/releases/latest/download/netbird_arm_64.qpkg</location>
+    </platform>
+    <platform>
+      <platformID>TS-X41</platformID>
+      <location>https://github.com/niclet/netbird-qnap/releases/latest/download/netbird_arm-x41.qpkg</location>
+    </platform>
+    <platform>
+      <platformID>TS-531P</platformID>
+      <location>https://github.com/niclet/netbird-qnap/releases/latest/download/netbird_arm-x41.qpkg</location>
+    </platform>
+    <platform>
+      <platformID>TS-X31P2</platformID>
+      <location>https://github.com/niclet/netbird-qnap/releases/latest/download/netbird_arm-x41.qpkg</location>
+    </platform>
+    <platform>
+      <platformID>TS-X31X</platformID>
+      <location>https://github.com/niclet/netbird-qnap/releases/latest/download/netbird_arm-x41.qpkg</location>
+    </platform>
+    <platform>
+      <platformID>TS-X31</platformID>
+      <location>https://github.com/niclet/netbird-qnap/releases/latest/download/netbird_arm-x31.qpkg</location>
+    </platform>
+    <snapshot>https://raw.githubusercontent.com/niclet/netbird-qnap/main/qpkg/icons/netbird_100.png</snapshot>
+    <forumLink>https://github.com/niclet/netbird-qnap/issues</forumLink>
   </item>
 </plugins>

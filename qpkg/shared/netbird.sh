@@ -11,6 +11,21 @@ NETBIRD_COMMON="${QPKG_ROOT}/netbird-common.sh"
 LAST_ERROR="${QPKG_ROOT}/last-error"
 PIDF="/var/run/netbird.pid"
 SVCLOG="/var/log/netbird-service.log"
+
+# The web UI is served by its own busybox httpd instance on this fixed port
+# (must match QPKG_WEB_PORT in qpkg.cfg) rather than through the system Apache.
+# This is deliberate: the Apache-Alias approach this QPKG used previously only
+# works when Container Station has been installed at least once, because
+# Container Station's own installer is what adds the
+# "Include /etc/container-proxy.d/*.conf" (and the apache-proxy.conf Include)
+# lines to QTS's main Apache config. Dropping a conf file into
+# /etc/container-proxy.d/ on a NAS that never had Container Station does
+# nothing, because nothing tells Apache to read that directory. Running our
+# own tiny httpd on a dedicated port has no such prerequisite.
+WEBUI_PORT="8095"
+WEBUI_PIDF="/var/run/netbird-httpd.pid"
+# Legacy paths from older releases' Apache-based setup, cleaned up on
+# start/stop below so an upgrade doesn't leave stale Apache config around.
 APACHE_CONF="/etc/default_config/apache-netbird.conf"
 
 # 'netbird up' normally finishes in seconds. It can block indefinitely if the
@@ -56,80 +71,60 @@ nb_timeout_prefix() {
     fi
 }
 
-setup_webui() {
-    # Drop-in proxy config (WordPress containerized QPKG pattern)
-    # /etc/container-proxy.d/ is auto-included by QTS Apache
-    _proxy_dir="/etc/container-proxy.d"
-    if [ -d "$_proxy_dir" ]; then
-        log "Using container-proxy.d drop-in"
-    else
-        mkdir -p "$_proxy_dir" 2>/dev/null
-        log "Created $_proxy_dir"
-    fi
-
-    # Alias directive serves files directly from QPKG_ROOT (no symlinks needed)
-    cat > "${_proxy_dir}/netbird.conf" <<AEOF
-Alias /netbird "${QPKG_ROOT}/web"
-<Directory "${QPKG_ROOT}/web">
-  Require all granted
-</Directory>
-ProxyPass /netbird !
-AEOF
-    log "Created ${_proxy_dir}/netbird.conf"
-
-    # Also write the standalone config as fallback
-    cat > "$APACHE_CONF" <<AEOF
-Alias /netbird "${QPKG_ROOT}/web"
-<Directory "${QPKG_ROOT}/web">
-  Require all granted
-</Directory>
-ProxyPass /netbird !
-AEOF
-
-    # Try CrashPlan-style Include into Apache proxy configs
+_cleanup_legacy_apache_webui() {
+    # Best-effort cleanup of what older releases left behind. None of this is
+    # required for the web UI to work; it just avoids leaving dead config
+    # around (and a stale symlink in the system cgi-bin) after an upgrade.
+    rm -f /etc/container-proxy.d/netbird.conf 2>/dev/null
+    rm -f "$APACHE_CONF" 2>/dev/null
     for _pf in /etc/config/apache/extra/apache-proxy.conf /etc/default_config/apache/extra/apache-proxy.conf; do
-        if [ -f "$_pf" ] && ! grep -q "apache-netbird.conf" "$_pf"; then
-            echo "Include ${APACHE_CONF}" >> "$_pf"
-            log "Added Include to $_pf"
-        fi
+        [ -f "$_pf" ] && sed -i '/apache-netbird\.conf/d' "$_pf" 2>/dev/null
     done
+    rm -f /home/httpd/cgi-bin/netbird-api.cgi 2>/dev/null
+    rm -f /home/Qhttpd/Web/netbird 2>/dev/null
+}
 
-    # Reload web servers
-    if [ -x /etc/init.d/thttpd.sh ]; then
-        /etc/init.d/thttpd.sh reload 2>>"$SVCLOG"
-        log "Reloaded thttpd"
+setup_webui() {
+    _cleanup_legacy_apache_webui
+
+    # Make sure no stale instance (ours or a leftover from a crashed prior
+    # run) is still holding the port.
+    if [ -f "$WEBUI_PIDF" ]; then
+        kill "$(cat "$WEBUI_PIDF")" 2>/dev/null
+        rm -f "$WEBUI_PIDF"
     fi
-    if [ -x /etc/init.d/stunnel.sh ]; then
-        /etc/init.d/stunnel.sh reload 2>>"$SVCLOG"
-        log "Reloaded stunnel"
+    pkill -f "busybox httpd -f -p ${WEBUI_PORT} " 2>/dev/null
+
+    if ! command -v busybox >/dev/null 2>&1; then
+        log "ERROR: busybox not found; cannot start the web UI"
+        record_error "busybox not found; web UI unavailable"
+        return 1
     fi
 
-    # CGI symlink (confirmed working on this NAS)
-    ln -sf "${QPKG_ROOT}/web/cgi-bin/netbird-api.cgi" /home/httpd/cgi-bin/netbird-api.cgi
-    if [ -L /home/httpd/cgi-bin/netbird-api.cgi ]; then
-        log "CGI symlink OK"
+    # Self-contained web server: serves ${QPKG_ROOT}/web directly on its own
+    # port. busybox httpd auto-detects a "cgi-bin" subdirectory of the doc
+    # root and runs executables under it as CGI, which is exactly the layout
+    # web/cgi-bin/netbird-api.cgi already has -- no Apache, no symlinks, no
+    # Container Station dependency.
+    busybox httpd -f -p "$WEBUI_PORT" -h "${QPKG_ROOT}/web" >>"$SVCLOG" 2>&1 &
+    _httpd_pid=$!
+    sleep 1
+    if kill -0 "$_httpd_pid" 2>/dev/null; then
+        echo "$_httpd_pid" > "$WEBUI_PIDF"
+        log "Web UI started on port ${WEBUI_PORT} (pid ${_httpd_pid})"
     else
-        log "ERROR: Failed to create CGI symlink"
+        log "ERROR: busybox httpd failed to start on port ${WEBUI_PORT} (port already in use?)"
+        record_error "Web UI failed to bind port ${WEBUI_PORT}. Is something else using that port?"
     fi
 }
 
 teardown_webui() {
-    # Remove drop-in proxy config
-    rm -f /etc/container-proxy.d/netbird.conf 2>/dev/null
-    rm -f "$APACHE_CONF"
-
-    # Remove Include lines from Apache proxy configs
-    for _pf in /etc/config/apache/extra/apache-proxy.conf /etc/default_config/apache/extra/apache-proxy.conf; do
-        [ -f "$_pf" ] && sed -i '/apache-netbird\.conf/d' "$_pf" 2>/dev/null
-    done
-
-    # Reload web servers
-    [ -x /etc/init.d/thttpd.sh ] && /etc/init.d/thttpd.sh reload 2>/dev/null
-    [ -x /etc/init.d/stunnel.sh ] && /etc/init.d/stunnel.sh reload 2>/dev/null
-
-    # Remove CGI symlink and stale web root symlinks
-    rm -f /home/httpd/cgi-bin/netbird-api.cgi
-    rm -f /home/Qhttpd/Web/netbird 2>/dev/null
+    if [ -f "$WEBUI_PIDF" ]; then
+        kill "$(cat "$WEBUI_PIDF")" 2>/dev/null
+        rm -f "$WEBUI_PIDF"
+    fi
+    pkill -f "busybox httpd -f -p ${WEBUI_PORT} " 2>/dev/null
+    _cleanup_legacy_apache_webui
 }
 
 # run_netbird_up builds the argv from netbird.conf and runs 'netbird up'.
@@ -258,7 +253,7 @@ start_service() {
     if [ -z "$NBQ_SETUP_KEY" ] && { [ -z "$_daemon_status" ] || [ "$_daemon_status" = "NeedsLogin" ]; }; then
         log "No SETUP_KEY configured and this peer is not registered."
         log "Daemon is running but the tunnel is not activated."
-        log "Configure via the web UI at /netbird/ or edit $NETBIRD_CONF"
+        log "Configure via the web UI at http://<NAS-IP>:${WEBUI_PORT}/ or edit $NETBIRD_CONF"
         record_error "No setup key configured. Enter one on the settings page and press Save & Restart."
         log "=== START COMPLETE (tunnel not activated) ==="
         return 0
